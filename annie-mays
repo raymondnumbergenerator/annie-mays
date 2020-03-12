@@ -1,7 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 import argparse
 import json
+import re
 import requests
 
 AUTH_PATH = 'auth'
@@ -84,29 +85,21 @@ def format(fmt, name, ep):
     return ''.join(result)
 
 def validate(name):
-    return name
+    return re.sub(r'[\\/:*?"<>|]', '', name)
 
-def fetch(args):
-    query = {}
-    header = {
-        'Accept-Language': 'ja',
-    }
-    if authenticated():
-        header.update(AUTH_TOKEN)
-        response = requests.get('https://api.thetvdb.com/series/{}/episodes'.format(args.id), params=query, headers=header)
-        if response.status_code == 404:
-            raise APIError('Series not found.')
-        if response.status_code != 200:
-            raise APIError('GET /series/{}/episodes {}'.format(args.id, response.status_code))
+def fetch(id, season):
+    response = requests.get('https://api.thetvdb.com/series/{}/episodes'.format(id), headers=AUTH_TOKEN)
+    if response.status_code == 404:
+        raise APIError('Series not found.')
+    if response.status_code != 200:
+        raise APIError('GET /series/{}/episodes {}'.format(id, response.status_code))
 
-        if args.name:
-            name = args.name
-        else:
-            name = requests.get('https://api.thetvdb.com/series/{}'.format(args.id), headers=AUTH_TOKEN).json()['data']['seriesName']
-
-        result = []
-        for ep in response.json()['data']:
-            sort_val = str(ep.get('absoluteNumber', '0' + str(ep['airedEpisodeNumber'])))
+    result = []
+    for ep in response.json()['data']:
+        if season is -1 or season == ep['airedSeason']:
+            sort_val = ep['absoluteNumber']
+            if sort_val is None:
+                sort_val = -123456 + ep['airedEpisodeNumber']
             result.append((sort_val,
                 {
                     'airedSeason': ep['airedSeason'],
@@ -114,20 +107,33 @@ def fetch(args):
                     'episodeNumber': ep['airedEpisodeNumber'],
                 })
             )
-        result.sort()
+    result.sort(key=lambda e: e[0])
+    return result
 
-        ep_list = []
-        for ep in result:
-            ep_list.append(format(args.format, name, ep[1]))
-        for e in ep_list:
-            print(e)
-    return
+def name_episodes(id, name, fmt, valid, episodes):
+    if not name:
+        name = requests.get('https://api.thetvdb.com/series/{}'.format(id), headers=AUTH_TOKEN).json()['data']['seriesName']
+
+    result = []
+    for ep in episodes:
+        ep_name = format(fmt, name, ep[1])
+        if valid:
+            ep_name = validate(ep_name)
+        result.append(ep_name)
+    return result
+
+def list_episodes(args):
+    if authenticated():
+        episodes = fetch(args.id, args.season)
+
+        names = name_episodes(args.id, args.name, args.format, args.validate, episodes)
+        [print(e) for e in names]
 
 def main(argv=None):
     commands = {
         'auth': auth,
         'search': search,
-        'fetch': fetch,
+        'list': list_episodes,
     }
 
     parser = argparse.ArgumentParser(description='Organizes and renames a directory of shows with data from TVDB.')
@@ -139,13 +145,12 @@ def main(argv=None):
     parser_search = subparsers.add_parser('search', help='Returns a list of series ids given a name.')
     parser_search.add_argument('name', type=str, help='name of a series')
 
-    parser_fetch = subparsers.add_parser('fetch', help='Returns a list of all episodes for a given series.')
-    parser_fetch.add_argument('id', type=int, help='series id')
-    parser_fetch.add_argument('--name', type=str, default='', help='override series name')
-    parser_fetch.add_argument('--season', type=int, help='only show results for the specified season (default: all seasons)')
-    parser_fetch.add_argument('--format', type=str, default='%N - %sx%e - %n', help='format for output list (default: %(default)s)')
-    parser_fetch.add_argument('--validate', action='store_false', help='validates episode names to be valid filenames (default: false)')
-    parser_fetch.add_argument('--list', action='store_false', help='prints the output list to console')
+    parser_list = subparsers.add_parser('list', help='Returns a list of all episodes for a given series.')
+    parser_list.add_argument('id', type=int, help='series id')
+    parser_list.add_argument('--name', type=str, default='', help='override series name')
+    parser_list.add_argument('--season', type=int, default=-1, help='only show results for the specified season (default: all seasons)')
+    parser_list.add_argument('--format', type=str, default='%N - %sx%e - %n', help='format for output list (default: %(default)s)')
+    parser_list.add_argument('--validate', action='store_true', help='validates episode names to be valid filenames (default: false)')
 
     args = parser.parse_args(argv)
     return commands[args.command](args)
