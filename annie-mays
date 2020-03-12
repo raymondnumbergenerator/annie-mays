@@ -1,0 +1,67 @@
+#!/usr/bin/python
+
+import argparse
+import json
+import requests
+
+AUTH_PATH = 'auth'
+KEY_PATH = 'key'
+
+AUTH_TOKEN = ''
+
+def auth(args):
+    try:
+        with open(KEY_PATH) as f:
+            auth_str = json.load(f)
+            response = requests.post('https://api.thetvdb.com/login', json=auth_str)
+            if response.status_code != 200:
+                raise ApiError('POST /login {}'.format(response.status_code))
+            with open(AUTH_PATH, 'w') as f:
+                json.dump(response.json(), f)
+    except IOError:
+        print('Create a json file named {} in this directory with your apikey, userkey, and username.'.format(KEY_PATH))
+
+def authenticated():
+    global AUTH_TOKEN
+    if AUTH_TOKEN:
+        return True
+    try:
+        with open(AUTH_PATH) as f:
+            AUTH_TOKEN = json.load(f)['token']
+        return True
+    except IOError:
+        print('Please run annie-mays auth to first get a valid JWT token.')
+
+def search(args):
+    return
+
+def fetch(args):
+    return
+
+def main(argv=None):
+    commands = {
+        'auth': auth,
+        'search': search,
+        'fetch': fetch,
+    }
+
+    parser = argparse.ArgumentParser(description='Organizes and renames a directory of shows with data from TVDB.')
+    subparsers = parser.add_subparsers(dest='command')
+    subparsers.required = True
+
+    parser_start = subparsers.add_parser('auth', help='Creates an authentication token in this directory.')
+
+    parser_start = subparsers.add_parser('search', help='Returns a list of series ids given a name.')
+    parser_start.add_argument('name', type=str, help='name of a series')
+
+    parser_fetch = subparsers.add_parser('fetch', help='Returns a list of all episodes for a given series.')
+    parser_fetch.add_argument('id', type=str, help='series id')
+    parser_fetch.add_argument('--name', type=str, default='', help='override series name')
+    parser_fetch.add_argument('--format', type=str, default='%N - %s-%e - %n', help='format for output list')
+    parser_fetch.add_argument('--validate', action='store_true', help='validates episode names to be valid filenames')
+
+    args = parser.parse_args(argv)
+    return commands[args.command](args)
+
+if __name__ == '__main__':
+    main()
