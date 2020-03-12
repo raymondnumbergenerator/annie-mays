@@ -9,6 +9,13 @@ KEY_PATH = 'key'
 
 AUTH_TOKEN = ''
 
+class APIError(Exception):
+    def __init__(self, status):
+        self.status = status
+
+    def __str__(self):
+        return "APIError: status={}".format(self.status)
+
 def auth(args):
     try:
         with open(KEY_PATH) as f:
@@ -23,19 +30,97 @@ def auth(args):
 
 def authenticated():
     global AUTH_TOKEN
-    if AUTH_TOKEN:
-        return True
     try:
         with open(AUTH_PATH) as f:
-            AUTH_TOKEN = json.load(f)['token']
+            AUTH_TOKEN = {"Authorization": 'Bearer ' + json.load(f)['token']}
         return True
-    except IOError:
+    except:
         print('Please run annie-mays auth to first get a valid JWT token.')
 
 def search(args):
-    return
+    query = {'name': args.name}
+    if authenticated():
+        response = requests.get('https://api.thetvdb.com/search/series', params=query, headers=AUTH_TOKEN)
+        if response.status_code == 404:
+            raise APIError('No results found.')
+        if response.status_code != 200:
+            raise APIError('GET /search/series {}'.format(response.status_code))
+
+        result = {}
+        for series in response.json()['data']:
+            result[series['id']] = {
+                    'seriesName': series['seriesName'],
+                    'aliases': series['aliases'],
+                    'firstAired': series['firstAired'],
+                    }
+
+        print(json.dumps(result, sort_keys=True, indent=4, ensure_ascii=False))
+
+def format(fmt, name, ep):
+    result = []
+    token = False
+
+    for c in fmt:
+        if token:
+            if c == 'N':
+                result.append(name)
+            elif c == 's':
+                result.append(str(ep['airedSeason']))
+            elif c == 'e':
+                e = ep['episodeNumber']
+                if e < 10:
+                    e = '0' + str(e)
+                else:
+                    e = str(e)
+                result.append(e)
+            elif c == 'n':
+                result.append(ep['episodeName'])
+            token = False
+        elif c == '%':
+            token = True
+        else:
+            result.append(c)
+
+    return ''.join(result)
+
+def validate(name):
+    return name
 
 def fetch(args):
+    query = {}
+    header = {
+        'Accept-Language': 'ja',
+    }
+    if authenticated():
+        header.update(AUTH_TOKEN)
+        response = requests.get('https://api.thetvdb.com/series/{}/episodes'.format(args.id), params=query, headers=header)
+        if response.status_code == 404:
+            raise APIError('Series not found.')
+        if response.status_code != 200:
+            raise APIError('GET /series/{}/episodes {}'.format(args.id, response.status_code))
+
+        if args.name:
+            name = args.name
+        else:
+            name = requests.get('https://api.thetvdb.com/series/{}'.format(args.id), headers=AUTH_TOKEN).json()['data']['seriesName']
+
+        result = []
+        for ep in response.json()['data']:
+            sort_val = str(ep.get('absoluteNumber', '0' + str(ep['airedEpisodeNumber'])))
+            result.append((sort_val,
+                {
+                    'airedSeason': ep['airedSeason'],
+                    'episodeName': ep['episodeName'],
+                    'episodeNumber': ep['airedEpisodeNumber'],
+                })
+            )
+        result.sort()
+
+        ep_list = []
+        for ep in result:
+            ep_list.append(format(args.format, name, ep[1]))
+        for e in ep_list:
+            print(e)
     return
 
 def main(argv=None):
@@ -49,16 +134,18 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest='command')
     subparsers.required = True
 
-    parser_start = subparsers.add_parser('auth', help='Creates an authentication token in this directory.')
+    parser_auth = subparsers.add_parser('auth', help='Creates an authentication token in this directory.')
 
-    parser_start = subparsers.add_parser('search', help='Returns a list of series ids given a name.')
-    parser_start.add_argument('name', type=str, help='name of a series')
+    parser_search = subparsers.add_parser('search', help='Returns a list of series ids given a name.')
+    parser_search.add_argument('name', type=str, help='name of a series')
 
     parser_fetch = subparsers.add_parser('fetch', help='Returns a list of all episodes for a given series.')
-    parser_fetch.add_argument('id', type=str, help='series id')
+    parser_fetch.add_argument('id', type=int, help='series id')
     parser_fetch.add_argument('--name', type=str, default='', help='override series name')
-    parser_fetch.add_argument('--format', type=str, default='%N - %s-%e - %n', help='format for output list')
-    parser_fetch.add_argument('--validate', action='store_true', help='validates episode names to be valid filenames')
+    parser_fetch.add_argument('--season', type=int, help='only show results for the specified season (default: all seasons)')
+    parser_fetch.add_argument('--format', type=str, default='%N - %sx%e - %n', help='format for output list (default: %(default)s)')
+    parser_fetch.add_argument('--validate', action='store_false', help='validates episode names to be valid filenames (default: false)')
+    parser_fetch.add_argument('--list', action='store_false', help='prints the output list to console')
 
     args = parser.parse_args(argv)
     return commands[args.command](args)
