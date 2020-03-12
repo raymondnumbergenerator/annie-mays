@@ -147,10 +147,10 @@ def main(argv=None):
 
     parser_list = subparsers.add_parser('list', help='Returns a list of all episodes for a given series.')
     parser_list.add_argument('id', type=int, help='series id')
-    parser_list.add_argument('--name', type=str, default='', help='override series name')
-    parser_list.add_argument('--season', type=int, default=-1, help='only show results for the specified season (default: all seasons)')
-    parser_list.add_argument('--format', type=str, default='%N - %sx%e - %n', help='format for output list (default: %(default)s)')
-    parser_list.add_argument('--validate', action='store_true', help='validates episode names to be valid filenames (default: false)')
+    parser_list.add_argument('--name', '-N', type=str, default='', help='override series name')
+    parser_list.add_argument('--season', '-S', type=int, default=-1, help='only show results for the specified season (default: all seasons)')
+    parser_list.add_argument('--format', '-F', type=str, default='%N - %sx%e - %n', help='format for output list (default: %(default)s)')
+    parser_list.add_argument('--validate', '-V', action='store_true', help='validates episode names to be valid filenames (default: false)')
 
     args = parser.parse_args(argv)
     return commands[args.command](args)
