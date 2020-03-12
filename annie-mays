@@ -15,7 +15,7 @@ class APIError(Exception):
         self.status = status
 
     def __str__(self):
-        return "APIError: status={}".format(self.status)
+        return "APIError: {}".format(self.status)
 
 def auth(args):
     try:
@@ -36,26 +36,31 @@ def authenticated():
             AUTH_TOKEN = {"Authorization": 'Bearer ' + json.load(f)['token']}
         return True
     except:
-        print('Please run annie-mays auth to first get a valid JWT token.')
+        print('Run annie-mays auth to first get a valid JWT token.')
 
 def search(args):
     query = {'name': args.name}
     if authenticated():
         response = requests.get('https://api.thetvdb.com/search/series', params=query, headers=AUTH_TOKEN)
+        if response.status_code == 401:
+            raise APIError('Run annie-mays auth to first get a valid JWT token.')
         if response.status_code == 404:
             raise APIError('No results found.')
         if response.status_code != 200:
             raise APIError('GET /search/series {}'.format(response.status_code))
 
-        result = {}
+        result = []
         for series in response.json()['data']:
-            result[series['id']] = {
+            result.append({
+                    'id': series['id'],
                     'seriesName': series['seriesName'],
                     'aliases': series['aliases'],
                     'firstAired': series['firstAired'],
-                    }
+            })
+            if len(result) == args.limit:
+                break
 
-        print(json.dumps(result, sort_keys=True, indent=4, ensure_ascii=False))
+        print(json.dumps(result, indent=4, ensure_ascii=False))
 
 def format(fmt, name, ep):
     result = []
@@ -71,9 +76,7 @@ def format(fmt, name, ep):
                 e = ep['episodeNumber']
                 if e < 10:
                     e = '0' + str(e)
-                else:
-                    e = str(e)
-                result.append(e)
+                result.append(str(e))
             elif c == 'n':
                 result.append(ep['episodeName'])
             token = False
@@ -89,6 +92,8 @@ def validate(name):
 
 def fetch(id, season):
     response = requests.get('https://api.thetvdb.com/series/{}/episodes'.format(id), headers=AUTH_TOKEN)
+    if response.status_code == 401:
+        raise APIError('Run annie-mays auth to first get a valid JWT token.')
     if response.status_code == 404:
         raise APIError('Series not found.')
     if response.status_code != 200:
@@ -96,7 +101,7 @@ def fetch(id, season):
 
     result = []
     for ep in response.json()['data']:
-        if season is -1 or season == ep['airedSeason']:
+        if ep['episodeName'] is not None and season is -1 or season == ep['airedSeason']:
             sort_val = ep['absoluteNumber']
             if sort_val is None:
                 sort_val = -123456 + ep['airedEpisodeNumber']
@@ -144,6 +149,7 @@ def main(argv=None):
 
     parser_search = subparsers.add_parser('search', help='Returns a list of series ids given a name.')
     parser_search.add_argument('name', type=str, help='name of a series')
+    parser_search.add_argument('--limit', '-L', type=int, default=1, help='limits the number of search results %(default)s)')
 
     parser_list = subparsers.add_parser('list', help='Returns a list of all episodes for a given series.')
     parser_list.add_argument('id', type=int, help='series id')
